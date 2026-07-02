@@ -17,12 +17,9 @@ from pydantic import BaseModel, Field
 
 
 load_dotenv()
-logging.basicConfig(level=logging.INFO, format="%(levelname)s │ %(name)s │ %(message)s")
+logging.basicConfig(level=logging.INFO, 
+                    format="%(levelname)s │ %(name)s │ %(message)s")
 logger = logging.getLogger(__name__)
-
-# ─────────────────────────────────────────────────────────────
-# 1.  PYDANTIC SCHEMAS  (strict JSON output contract)
-# ─────────────────────────────────────────────────────────────
 
 class FinancialAnswer(BaseModel):
     """
@@ -34,16 +31,14 @@ class FinancialAnswer(BaseModel):
     )
     source_documents_used: list[str] = Field(
         description=(
-            "List of source references used (e.g. document titles, "
-            "URLs, or chunk IDs)."
+            "List of source references used  "            
         )
     )
     confidence_score: float = Field(
         ge=0.0,
         le=1.0,
         description=(
-            "A self-assessed confidence score between 0.0 and 1.0 "
-            "reflecting how well the retrieved context supports the answer."
+            "A self-assessed confidence score between 0.0 and 1.0 reflecting how well the retrieved context supports the answer."
         ),
     )
     key_metrics: dict[str, str] | None = Field(
@@ -80,62 +75,34 @@ class GradeDecision(BaseModel):
     reason: str = Field(description="One-sentence justification for the grade.")
 
 
-# ─────────────────────────────────────────────────────────────
-# 2.  AGENT STATE  (typed dict that flows through the graph)
-# ─────────────────────────────────────────────────────────────
-
 class AgentState(TypedDict):
     """
-    Mutable state passed between every node.
-    `add_messages` is a LangGraph reducer — it appends rather than
-    overwrites the messages list, enabling a full conversation trace.
+    Mutable state passed between every node. 
+    `add_messages` is a LangGraph reducer — it appends rather than overwriting the messages list, enabling a full conversation trace.
     """
-    # Conversation history (user + assistant turns)
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-
-    # Original user query
+    messages: Annotated[Sequence[BaseMessage], add_messages] #history
     original_query: str
-
-    # 3 alternative query variations produced by the router
     query_variations: list[str]
-
-    # Tool routing decision: "vector" | "web" | "both"
     route: str
-
-    # Raw retrieved context chunks (combined from all tools)
     retrieved_context: list[str]
-
-    # Source references (filenames, URLs, chunk IDs)
     source_references: list[str]
-
-    # Number of self-correction retry attempts (max = 2)
     retry_count: int
-
-    # Final structured answer (populated in the Generation node)
     final_answer: FinancialAnswer | None
-
-    # Internal thought-process log for the Streamlit sidebar
     thought_log: list[str]
 
-
-# ─────────────────────────────────────────────────────────────
-# 3.  LLM & TOOL INITIALISATION
-# ─────────────────────────────────────────────────────────────
-
 def build_llm(temperature: float = 0.0) -> ChatGroq:
-    """Return a deterministic GPT-4o-mini instance."""
+    """Return a deterministic ChatGroq instance."""
     return ChatGroq(
-        model="gpt-4o-mini",
+        model="llama3-8b-8192",
         temperature=temperature,
-        openai_api_key=os.environ["OPENAI_API_KEY"],
+        groq_api_key=os.environ["GROQ_API_KEY"],
     )
 
 
 def build_embeddings() -> HuggingFaceEmbeddings:
-    """text-embedding-3-small — cost-effective, high-quality."""
+    """all-MiniLM-L6-v2 — cost-effective, high-quality."""
     return HuggingFaceEmbeddings(
-        model="text-embedding-3-small",
-        openai_api_key=os.environ["OPENAI_API_KEY"],
+        model="all-MiniLM-L6-v2",
     )
 
 
@@ -144,8 +111,7 @@ def build_pinecone_retriever(
     top_k: int = 6,
 ) -> PineconeVectorStore:
     """
-    Connect to an existing Pinecone index and return a retriever.
-    Metadata filters can be applied at query time via `search_kwargs`.
+    Connect to an existing Pinecone index and return a retriever. Metadata filters can be applied at query time via `search_kwargs`.
     """
     embeddings = build_embeddings()
     vectorstore = PineconeVectorStore(
@@ -161,8 +127,7 @@ def build_pinecone_retriever(
 
 def build_web_search_tool(max_results: int = 4) -> TavilySearchResults:
     """
-    Tavily search — real-time financial news and stock prices.
-    Falls back gracefully if TAVILY_API_KEY is not set (returns mock).
+    Tavily search — real-time financial news and stock prices. 
     """
     return TavilySearchResults(
         max_results=max_results,
@@ -170,27 +135,18 @@ def build_web_search_tool(max_results: int = 4) -> TavilySearchResults:
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# 4.  INDIVIDUAL GRAPH NODES
-# ─────────────────────────────────────────────────────────────
-
-# ── 4a. Multi-Query Router ────────────────────────────────────
-
 ROUTER_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
             """You are a financial query analyst. Given a user question:
-1. Generate EXACTLY 3 alternative phrasings that improve vector-search recall
-   (e.g. use synonyms, rephrase as a fact, include ticker symbols).
-2. Decide the best data source:
-   - "vector"  → the question is about historical earnings, filings, or fundamentals
-   - "web"     → the question requires real-time stock price or very recent news
-   - "both"    → the question needs historical context AND live data
-
-Respond ONLY with valid JSON matching this schema:
-{format_instructions}""",
-        ),
+            1. Generate EXACTLY 3 alternative phrasings that improve vector-search recall  (e.g. use synonyms, rephrase as a fact, include ticker symbols).
+            2. Decide the best data source:
+            - "vector"  → the question is about historical earnings, filings, or fundamentals
+            - "web"     → the question requires real-time stock price or very recent news
+            - "both"    → the question needs historical context AND live data
+            Respond ONLY with valid JSON matching this schema: {format_instructions}""",
+            ),
         ("human", "{query}"),
     ]
 )
@@ -199,9 +155,7 @@ Respond ONLY with valid JSON matching this schema:
 def node_multi_query_router(state: AgentState) -> dict:
     """
     Node 1 — Multi-Query Router
-    ───────────────────────────
-    Expands the user query into 3 variations and selects the
-    appropriate retrieval route.
+    Expands the user query into 3 variations and selects the appropriate retrieval route.
     """
     logger.info("NODE │ multi_query_router")
     llm = build_llm()
@@ -229,14 +183,10 @@ def node_multi_query_router(state: AgentState) -> dict:
     }
 
 
-# ── 4b. Retrieval ─────────────────────────────────────────────
-
 def node_retrieval(state: AgentState) -> dict:
     """
     Node 2 — Retrieval
-    ──────────────────
-    Executes retrieval across the selected tools using all 3 query
-    variations. Results are deduplicated by page-content hash.
+    Executes retrieval across the selected tools using all 3 query variations. Results are deduplicated by page-content hash.
     """
     logger.info("NODE │ retrieval (retry=%d)", state.get("retry_count", 0))
     route = state["route"]
@@ -244,7 +194,7 @@ def node_retrieval(state: AgentState) -> dict:
     context_chunks: list[str] = []
     source_refs: list[str] = []
 
-    # ── Vector Store retrieval ──
+     
     if route in ("vector", "both"):
         retriever = build_pinecone_retriever()
         seen: set[str] = set()
@@ -260,10 +210,10 @@ def node_retrieval(state: AgentState) -> dict:
                         f"[{meta.get('company', '')} {meta.get('quarter', '')}]"
                     )
 
-    # ── Web / Tavily retrieval ──
+    
     if route in ("web", "both"):
         search_tool = build_web_search_tool()
-        for q in queries[:1]:  # limit to primary query for web search
+        for q in queries[:1]: 
             results = search_tool.invoke(q)
             for r in results:
                 snippet = r.get("content", "")
@@ -285,29 +235,20 @@ def node_retrieval(state: AgentState) -> dict:
     }
 
 
-# ── 4c. Grade Gate (Self-Correction) ─────────────────────────
-
 GRADE_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """You are a strict relevance grader for a financial RAG system.
-Given the user question and the retrieved context passages, assess whether
-the context is SUFFICIENT to produce an accurate, grounded answer.
-
-Grade as "relevant" only if:
-  • The context contains specific data points that directly address the query.
-  • There is no clear factual gap that would force the LLM to hallucinate.
-
-Grade as "irrelevant" if the context is off-topic, too generic, or missing
-the specific metrics needed to answer the question.
-
-Respond ONLY with valid JSON:
-{format_instructions}""",
+            """You are a strict relevance grader for a financial RAG system. Given the user question and the retrieved context passages, assess whether the context is SUFFICIENT to produce an accurate, grounded answer.
+            Grade as "relevant" only if:
+              • The context contains specific data points that directly address the query.
+              • There is no clear factual gap that would force the LLM to hallucinate.
+            Grade as "irrelevant" if the context is off-topic, too generic, or missing the specific metrics needed to answer the question.
+            Respond ONLY with valid JSON: {format_instructions}""",
         ),
         (
             "human",
-            "Question: {question}\n\nContext:\n{context}",
+            "Question: {question} \n\n Context:\n{context}",
         ),
     ]
 )
@@ -316,9 +257,7 @@ Respond ONLY with valid JSON:
 def node_grade_gate(state: AgentState) -> dict:
     """
     Node 3 — Grade Gate
-    ───────────────────
-    LLM-based grader. Populates 'grade' key in state; the conditional
-    edge function reads this to route to Generation or Rewriter.
+    LLM-based grader. Populates 'grade' key in state; the conditional edge function reads this to route to Generation or Rewriter.
     """
     logger.info("NODE │ grade_gate")
     llm = build_llm()
@@ -350,11 +289,10 @@ def node_grade_gate(state: AgentState) -> dict:
 def edge_grade_router(state: AgentState) -> str:
     """
     Conditional edge after Grade Gate.
-    ────────────────────────────────────
     Returns the name of the next node:
-      • "generate"  → context is good, proceed
-      • "rewrite"   → context is bad and retries remain
-      • "generate"  → context is bad but max retries (2) exhausted;
+      • "generate"  -> context is good, proceed
+      • "rewrite"   -> context is bad and retries remain
+      • "generate"  -> context is bad but max retries (2) exhausted;
                        generate a best-effort / low-confidence answer
     """
     grade = state.get("grade", "irrelevant")
@@ -362,40 +300,33 @@ def edge_grade_router(state: AgentState) -> str:
     max_retries = 2
 
     if grade == "relevant":
-        logger.info("EDGE │ grade_router → generate")
+        logger.info("EDGE │ grade_router -> generate")
         return "generate"
     if retries < max_retries:
-        logger.info("EDGE │ grade_router → rewrite (retry %d)", retries + 1)
+        logger.info("EDGE │ grade_router -> rewrite (retry %d)", retries + 1)
         return "rewrite"
-    # Max retries exhausted — generate with low confidence
-    logger.warning("EDGE │ grade_router → generate (max retries exhausted)")
+    logger.warning("EDGE │ grade_router -> generate (max retries exhausted)")
     return "generate"
 
 
-# ── 4d. Query Rewriter ───────────────────────────────────────
-
 REWRITE_PROMPT = PromptTemplate.from_template(
-    """The previous retrieval attempt for the question below returned
-irrelevant context. Rewrite the query to be MORE SPECIFIC and targeted
-so that a vector similarity search will return better results.
-
-Original question: {question}
-Previous query variations used: {previous_variations}
-
-Return ONLY the improved query as a plain string — no JSON, no quotes."""
+    """The previous retrieval attempt for the question below returned irrelevant context. Rewrite the query to be MORE SPECIFIC and targeted 
+    so that a vector similarity search will return better results.
+    Original question: {question}
+    Previous query variations used: {previous_variations}
+    Return ONLY the improved query as a plain string — no JSON, no quotes."""
 )
 
 
 def node_query_rewriter(state: AgentState) -> dict:
     """
     Query Rewriter Node
-    ───────────────────
     Produces a new primary query, regenerates 3 variations via the router
     prompt, and increments the retry counter. The graph then loops back
     to node_retrieval.
     """
     logger.info("NODE │ query_rewriter")
-    llm = build_llm(temperature=0.3)  # slight creativity for rewriting
+    llm = build_llm(temperature=0.3) 
 
     rewritten_q: str = (REWRITE_PROMPT | llm).invoke(
         {
@@ -404,7 +335,6 @@ def node_query_rewriter(state: AgentState) -> dict:
         }
     ).content.strip()
 
-    # Re-run the router logic inline to produce 3 new variations
     router_parser = PydanticOutputParser(pydantic_object=RouteDecision)
     router_chain = ROUTER_PROMPT | llm | router_parser
     new_decision: RouteDecision = router_chain.invoke(
@@ -422,7 +352,7 @@ def node_query_rewriter(state: AgentState) -> dict:
     logger.info(log_entry)
 
     return {
-        "original_query": rewritten_q,          # update primary query
+        "original_query": rewritten_q,          
         "query_variations": new_decision.query_variations,
         "route": new_decision.route,
         "retry_count": new_retry,
@@ -430,22 +360,16 @@ def node_query_rewriter(state: AgentState) -> dict:
     }
 
 
-# ── 4e. Generation & Structured Validation ───────────────────
-
-GENERATION_SYSTEM = """You are an elite financial analyst AI assistant.
-Using ONLY the context provided below, answer the user's question with
+GENERATION_SYSTEM = """You are an elite financial analyst AI assistant. Using ONLY the context provided below, answer the user's question with
 precision and cite specific figures where available.
-
 IMPORTANT FORMATTING RULES:
-- You MUST respond with a single JSON object matching this exact schema:
-{format_instructions}
+- You MUST respond with a single JSON object matching this exact schema: {format_instructions}
 - Do NOT wrap the JSON in markdown code fences.
 - Do NOT include any text before or after the JSON.
 - If the context does not fully support the answer, set confidence_score
   below 0.5 and acknowledge the gap in the 'answer' field."""
 
-GENERATION_HUMAN = """Context:
-{context}
+GENERATION_HUMAN = """Context: {context}
 
 Question: {question}"""
 
@@ -453,10 +377,8 @@ Question: {question}"""
 def node_generation(state: AgentState) -> dict:
     """
     Node 4 — Generation & Structured Validation
-    ─────────────────────────────────────────────
     Generates the final answer with PydanticOutputParser enforcement.
-    The parser will raise ValidationError if the LLM deviates from
-    the FinancialAnswer schema — we handle this with a fallback.
+    The parser will raise ValidationError if the LLM deviates from the FinancialAnswer schema , we handle this with a fallback.
     """
     logger.info("NODE │ generation")
     llm = build_llm()
@@ -483,7 +405,6 @@ def node_generation(state: AgentState) -> dict:
             }
         )
     except Exception as exc:
-        # Graceful degradation: return a structured error response
         logger.error("Generation validation failed: %s", exc)
         answer = FinancialAnswer(
             answer=(
@@ -500,7 +421,6 @@ def node_generation(state: AgentState) -> dict:
     )
     logger.info(log_entry)
 
-    # Append assistant reply to message history
     assistant_msg = AIMessage(content=answer.answer)
 
     return {
@@ -510,45 +430,35 @@ def node_generation(state: AgentState) -> dict:
     }
 
 
-# ─────────────────────────────────────────────────────────────
-# 5.  GRAPH ASSEMBLY
-# ─────────────────────────────────────────────────────────────
-
 def build_graph() -> StateGraph:
     """
     Assemble and compile the LangGraph StateGraph.
 
-    Node registry
-    ─────────────
-    multi_query_router  →  Node 1
-    retrieval           →  Node 2
-    grade_gate          →  Node 3
-    rewrite             →  Query Rewriter (loops back to retrieval)
-    generate            →  Node 4
+    Node registry:
+    multi_query_router  ->  Node 1
+    retrieval           -> Node 2
+    grade_gate          ->  Node 3
+    rewrite             ->  Query Rewriter (loops back to retrieval)
+    generate            -> Node 4
 
-    Conditional edges
-    ─────────────────
+    Conditional edges:
     grade_gate  ──[relevant]──►  generate
-                ──[irrelevant, retries < 2]──►  rewrite
-                ──[irrelevant, retries >= 2]──►  generate (forced)
+                ──[irrelevant, retries < 2]──>  rewrite
+                ──[irrelevant, retries >= 2]──> generate (forced)
     """
     graph = StateGraph(AgentState)
 
-    # Register nodes
     graph.add_node("multi_query_router", node_multi_query_router)
     graph.add_node("retrieval", node_retrieval)
     graph.add_node("grade_gate", node_grade_gate)
     graph.add_node("rewrite", node_query_rewriter)
     graph.add_node("generate", node_generation)
 
-    # Entry point
     graph.add_edge(START, "multi_query_router")
 
-    # Linear edges
     graph.add_edge("multi_query_router", "retrieval")
     graph.add_edge("retrieval", "grade_gate")
 
-    # Conditional branch at Grade Gate
     graph.add_conditional_edges(
         "grade_gate",
         edge_grade_router,
@@ -558,26 +468,20 @@ def build_graph() -> StateGraph:
         },
     )
 
-    # Rewriter loops back to retrieval
     graph.add_edge("rewrite", "retrieval")
 
-    # Generation is the terminal node
     graph.add_edge("generate", END)
 
     return graph.compile()
 
-
-# ─────────────────────────────────────────────────────────────
-# 6.  PUBLIC HELPER: run a single query end-to-end
-# ─────────────────────────────────────────────────────────────
 
 def run_query(query: str) -> AgentState:
     """
     Convenience wrapper — builds and invokes the full graph.
 
     Returns the final AgentState so callers can access:
-      state["final_answer"]   → FinancialAnswer pydantic object
-      state["thought_log"]    → list of internal reasoning steps
+      state["final_answer"]   -> FinancialAnswer pydantic object
+      state["thought_log"]    ->list of internal reasoning steps
     """
     app = build_graph()
     initial_state: AgentState = {
