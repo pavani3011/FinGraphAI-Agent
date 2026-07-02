@@ -3,9 +3,7 @@ import time
 from pathlib import Path
 import streamlit as st
 
-# ─────────────────────────────────────────────────────────────
-# Page config (must be first Streamlit call)
-# ─────────────────────────────────────────────────────────────
+
 st.set_page_config(
     page_title="Financial Analyst Agent",
     page_icon="📊",
@@ -13,9 +11,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─────────────────────────────────────────────────────────────
-# Custom CSS — refined dark-finance aesthetic
-# ─────────────────────────────────────────────────────────────
+
 st.markdown(
     """
     <style>
@@ -102,16 +98,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ─────────────────────────────────────────────────────────────
-# Sidebar
-# ─────────────────────────────────────────────────────────────
+
 
 with st.sidebar:
-    st.markdown("## 📊 Agent Intelligence Panel")
+    st.markdown("##  Agent Intelligence Panel")
     st.markdown("---")
 
-    # ── Ragas Evaluation Scores ──────────────────────────────
-    st.markdown("### 🧪 Ragas Eval Scores")
+    
+    st.markdown("###  Ragas Eval Scores")
     ragas_path = Path("./ragas_results.json")
     if ragas_path.exists():
         ragas_data = json.loads(ragas_path.read_text())
@@ -144,7 +138,7 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ── Thought Log (populated after a query runs) ───────────
+    
     st.markdown("### 🧠 Agent Thought Process")
     thought_placeholder = st.empty()
 
@@ -166,17 +160,14 @@ with st.sidebar:
     st.caption("Max self-correction retries: `2`")
 
 
-# ─────────────────────────────────────────────────────────────
-# Main Panel
-# ─────────────────────────────────────────────────────────────
 
-st.markdown("# 📈 Financial Analyst Agent")
+
+st.markdown("# Financial Analyst Agent")
 st.markdown(
     "Enterprise-grade **Reliable RAG** system — LangGraph · Pinecone · Ragas"
 )
 st.markdown("---")
 
-# ── Sample questions ─────────────────────────────────────────
 SAMPLES = [
     "What was Apple's revenue and EPS in Q3 2024?",
     "How did Microsoft Azure grow in Q4 FY2024?",
@@ -190,7 +181,6 @@ for i, sample in enumerate(SAMPLES):
     if cols[i].button(sample[:40] + "…", key=f"sample_{i}"):
         st.session_state.prefill_query = sample
 
-# ── Query Input ───────────────────────────────────────────────
 prefill = st.session_state.get("prefill_query", "")
 query = st.text_input(
     "Ask a financial question",
@@ -201,9 +191,7 @@ query = st.text_input(
 
 run_btn = st.button("🔍 Run Analysis", type="primary")
 
-# ── Response Area ─────────────────────────────────────────────
 if run_btn and query.strip():
-    # Clear previous prefill
     if "prefill_query" in st.session_state:
         del st.session_state["prefill_query"]
 
@@ -214,9 +202,7 @@ if run_btn and query.strip():
             state = run_query(query.strip())
             answer = state.get("final_answer")
 
-            # Persist thought log to sidebar
             st.session_state.thought_log = state.get("thought_log", [])
-            # Force sidebar refresh
             st.rerun()
 
         except Exception as exc:
@@ -224,7 +210,6 @@ if run_btn and query.strip():
             st.stop()
 
     if answer:
-        # ── Confidence Badge ──────────────────────────────────
         conf = answer.confidence_score
         badge_color = (
             "#238636" if conf >= 0.75
@@ -244,40 +229,34 @@ if run_btn and query.strip():
             unsafe_allow_html=True,
         )
 
-        # ── Answer Card ───────────────────────────────────────
         st.markdown(
             f"<div class='answer-card'>{answer.answer}</div>",
             unsafe_allow_html=True,
         )
 
-        # ── Key Metrics ───────────────────────────────────────
         if answer.key_metrics:
-            st.markdown("#### 📈 Extracted Key Metrics")
+            st.markdown("####  Extracted Key Metrics")
             metrics_html = "".join(
                 f"<span class='metric-pill'>{k}: {v}</span>"
                 for k, v in answer.key_metrics.items()
             )
             st.markdown(metrics_html, unsafe_allow_html=True)
 
-        # ── Sources ───────────────────────────────────────────
         if answer.source_documents_used:
-            st.markdown("#### 📎 Sources Used")
+            st.markdown("####  Sources Used")
             for src in answer.source_documents_used:
                 st.markdown(
                     f"<div class='source-ref'>↳ {src}</div>",
                     unsafe_allow_html=True,
                 )
 
-        # ── Raw JSON (expandable) ─────────────────────────────
         with st.expander("View raw structured JSON output"):
             st.json(answer.model_dump())
 
 elif run_btn and not query.strip():
     st.warning("Please enter a question first.")
 
-# ─────────────────────────────────────────────────────────────
-# Footer
-# ─────────────────────────────────────────────────────────────
+
 st.markdown("---")
 st.caption(
     "Built with LangGraph · LangChain · Pinecone · Ragas | "

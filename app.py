@@ -1,5 +1,3 @@
-"""  streamlit run streamlit_app.py """
-
 import argparse
 import json
 import logging
@@ -16,16 +14,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────────────────────
-# WEEK 1 — Ingestion Pipeline
-# ─────────────────────────────────────────────────────────────
-
 def ingest_pdfs(pdf_dir: str = "./data/pdfs", index_name: str = "financial-rag") -> None:
     """
     Week 1 Task: Advanced PDF ingestion with RecursiveCharacterTextSplitter.
 
-    Pipeline
-    ────────
+    Pipeline:
     1. Load all PDFs from `pdf_dir`.
     2. Chunk with RecursiveCharacterTextSplitter (overlap preserves context
        across chunk boundaries — critical for financial tables).
@@ -46,10 +39,7 @@ def ingest_pdfs(pdf_dir: str = "./data/pdfs", index_name: str = "financial-rag")
         logger.error("PDF directory '%s' not found. Create it and add PDFs.", pdf_dir)
         return
 
-    # ── Chunking strategy ──────────────────────────────────────
-    # chunk_size=1000 chars ≈ 200-250 tokens (safe under 8k context)
-    # chunk_overlap=200 preserves cross-boundary financial sentences
-    # separators prioritise paragraph → sentence → word breaks
+  
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
@@ -64,7 +54,7 @@ def ingest_pdfs(pdf_dir: str = "./data/pdfs", index_name: str = "financial-rag")
         loader = PyPDFLoader(str(pdf_file))
         pages = loader.load()
 
-        # Parse metadata from filename  e.g. AAPL_Q3_2024.pdf
+        
         stem_parts = pdf_file.stem.upper().split("_")
         company = stem_parts[0] if len(stem_parts) > 0 else "UNKNOWN"
         quarter = stem_parts[1] if len(stem_parts) > 1 else "Q?"
@@ -72,7 +62,7 @@ def ingest_pdfs(pdf_dir: str = "./data/pdfs", index_name: str = "financial-rag")
 
         chunks = splitter.split_documents(pages)
         for i, chunk in enumerate(chunks):
-            # Enrich metadata — this powers filtered retrieval later
+            
             chunk.metadata.update(
                 {
                     "source": pdf_file.name,
@@ -83,7 +73,7 @@ def ingest_pdfs(pdf_dir: str = "./data/pdfs", index_name: str = "financial-rag")
                 }
             )
         all_chunks.extend(chunks)
-        logger.info("  → %d chunks created from %s", len(chunks), pdf_file.name)
+        logger.info("  -> %d chunks created from %s", len(chunks), pdf_file.name)
 
     if not all_chunks:
         logger.warning("No chunks produced. Check PDF directory.")
@@ -91,13 +81,13 @@ def ingest_pdfs(pdf_dir: str = "./data/pdfs", index_name: str = "financial-rag")
 
     logger.info("Total chunks to upsert: %d", len(all_chunks))
 
-    # ── Upsert to Pinecone ─────────────────────────────────────
+    
     embeddings = OpenAIEmbeddings(
         model="text-embedding-3-small",
         openai_api_key=os.environ["OPENAI_API_KEY"],
     )
 
-    # PineconeVectorStore.from_documents handles batching automatically
+   
     vectorstore = PineconeVectorStore.from_documents(
         documents=all_chunks,
         embedding=embeddings,
@@ -111,14 +101,10 @@ def ingest_pdfs(pdf_dir: str = "./data/pdfs", index_name: str = "financial-rag")
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# WEEK 2 — CLI Query Demo
-# ─────────────────────────────────────────────────────────────
 
 def run_cli_query(query: str) -> None:
     """
-    Runs a single query through the full LangGraph agent and prints
-    the structured result to stdout.
+    Runs a single query through the full LangGraph agent and prints the structured result to stdout.
     """
     from graph_logic import run_query
 
@@ -126,35 +112,27 @@ def run_cli_query(query: str) -> None:
     state = run_query(query)
     answer = state.get("final_answer")
 
-    print("\n" + "═" * 60)
     print("  FINANCIAL ANALYST AGENT — RESULT")
-    print("═" * 60)
 
     if answer:
-        print(f"\n📊 Answer:\n{answer.answer}\n")
-        print(f"🔒 Confidence: {answer.confidence_score:.0%}")
+        print(f"\n Answer:\n{answer.answer}\n")
+        print(f" Confidence: {answer.confidence_score:.0%}")
         if answer.key_metrics:
-            print("\n📈 Key Metrics:")
+            print("\n Key Metrics:")
             for k, v in answer.key_metrics.items():
                 print(f"   {k}: {v}")
-        print("\n📎 Sources:")
+        print("\n Sources:")
         for src in answer.source_documents_used:
             print(f"   • {src}")
     else:
         print("No answer generated.")
 
-    print("\n🧠 Agent Thought Log:")
+    print("\n Agent Thought Log:")
     for step in state.get("thought_log", []):
         print(f"   {step}")
     print("═" * 60 + "\n")
 
 
-# ─────────────────────────────────────────────────────────────
-# WEEK 3 — Ragas Evaluation Pipeline
-# ─────────────────────────────────────────────────────────────
-
-# ── Sample test dataset (3 QA pairs with ground truths) ───────
-# In production, expand this to 20+ samples from your actual PDFs.
 RAGAS_TEST_DATASET = [
     {
         "question": "What was Apple's total revenue in Q3 2024?",
@@ -162,7 +140,6 @@ RAGAS_TEST_DATASET = [
             "Apple reported total revenue of $85.8 billion in Q3 2024, "
             "representing a 5% year-over-year increase."
         ),
-        # Simulate what a well-tuned retriever would return
         "contexts": [
             (
                 "Apple Inc. Q3 2024 Earnings Release. Net sales: $85.8 billion, "
@@ -174,7 +151,6 @@ RAGAS_TEST_DATASET = [
                 "revenue ever with 5% growth year-over-year to $85.8 billion.'"
             ),
         ],
-        # What the agent actually said
         "answer": (
             "Apple's total revenue in Q3 2024 was $85.8 billion, "
             "a 5% increase year-over-year driven by record Services revenue of $24.2B."
@@ -228,15 +204,13 @@ def run_ragas_evaluation() -> None:
     """
     Week 3 Task: Compute Ragas RAG quality metrics offline.
 
-    Metrics computed
-    ─────────────────
+    Metrics computed:
     faithfulness     — Does the answer stay grounded in the context?
                        (Hallucination detector: 1.0 = fully grounded)
     answer_relevance — Is the answer actually responsive to the question?
                        (Relevance: 1.0 = perfectly on-point)
 
-    Interpreting results
-    ────────────────────
+    Interpreting results:
     • faithfulness < 0.7  → retrieval or grounding problem
     • answer_relevance < 0.8 → generation / prompting problem
 
@@ -255,8 +229,6 @@ def run_ragas_evaluation() -> None:
         return
 
     logger.info("Building Ragas evaluation dataset (%d samples)…", len(RAGAS_TEST_DATASET))
-
-    # Ragas expects a HuggingFace Dataset with these exact column names
     dataset_dict = {
         "question": [s["question"] for s in RAGAS_TEST_DATASET],
         "answer": [s["answer"] for s in RAGAS_TEST_DATASET],
@@ -269,8 +241,7 @@ def run_ragas_evaluation() -> None:
     result = evaluate(
         dataset=dataset,
         metrics=[faithfulness, answer_relevancy],
-        # Ragas uses gpt-4 by default; override with gpt-4o-mini for cost
-        llm=None,  # uses OPENAI_API_KEY env var automatically
+        llm=None,  
         raise_exceptions=False,
     )
 
@@ -285,7 +256,6 @@ def run_ragas_evaluation() -> None:
     print(f"   faithfulness     : {df['faithfulness'].mean():.4f}")
     print(f"   answer_relevancy : {df['answer_relevancy'].mean():.4f}")
 
-    # Save results for the Streamlit dashboard
     results_path = Path("./ragas_results.json")
     results_path.write_text(
         json.dumps(
@@ -303,9 +273,6 @@ def run_ragas_evaluation() -> None:
     print("═" * 60 + "\n")
 
 
-# ─────────────────────────────────────────────────────────────
-# CLI ENTRYPOINT
-# ─────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(
